@@ -25,6 +25,8 @@ import (
 	"github.com/pulumi/pulumi/sdk/v3/go/common/diag"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/diag/colors"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/resource/config"
+	"github.com/pulumi/pulumi/sdk/v3/go/common/tokens"
+	"github.com/pulumi/pulumi/sdk/v3/go/common/util/contract"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/util/rpcutil"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/workspace"
 )
@@ -37,7 +39,7 @@ type Context struct {
 	StatusDiag diag.Sink // the diagnostics sink to use for status messages.
 	Host       Host      // the host that can be used to fetch providers.
 	Pwd        string    // the working directory to spawn all plugins in.
-	Root       string    // the root directory of the project.
+	Root       string    // the root directory of the context.
 
 	// If non-nil, configures custom gRPC client options. Receives pluginInfo which is a JSON-serializable bit of
 	// metadata describing the plugin.
@@ -72,15 +74,28 @@ func NewContext(d, statusD diag.Sink, host Host, _ ConfigSource,
 		}
 	}
 
-	root := ""
-	return NewContextWithRoot(d, statusD, host, pwd, root, runtimeOptions,
-		disableProviderPreview, parentSpan, plugins, nil)
+	return NewContextWithRoot(d, statusD, host, pwd, pwd, runtimeOptions,
+		disableProviderPreview, parentSpan, plugins, nil, nil)
 }
 
 // NewContextWithRoot is a variation of NewContext that also sets known project Root. Additionally accepts Plugins
 func NewContextWithRoot(d, statusD diag.Sink, host Host,
 	pwd, root string, runtimeOptions map[string]interface{}, disableProviderPreview bool,
 	parentSpan opentracing.Span, plugins *workspace.Plugins, config map[config.Key]string,
+	debugging DebugEventEmitter,
+) (*Context, error) {
+	return NewContextWithContext(
+		context.Background(), d, statusD, host, pwd, root,
+		runtimeOptions, disableProviderPreview, parentSpan, plugins, config, debugging)
+}
+
+// NewContextWithContext is a variation of NewContextWithRoot that also sets the base context.
+func NewContextWithContext(
+	ctx context.Context,
+	d, statusD diag.Sink, host Host,
+	pwd, root string, runtimeOptions map[string]interface{}, disableProviderPreview bool,
+	parentSpan opentracing.Span, plugins *workspace.Plugins, config map[config.Key]string,
+	debugging DebugEventEmitter,
 ) (*Context, error) {
 	if d == nil {
 		d = diag.DefaultSink(io.Discard, io.Discard, diag.FormatOptions{Color: colors.Never})
@@ -89,31 +104,45 @@ func NewContextWithRoot(d, statusD diag.Sink, host Host,
 		statusD = diag.DefaultSink(io.Discard, io.Discard, diag.FormatOptions{Color: colors.Never})
 	}
 
-	ctx := &Context{
+	var projectName tokens.PackageName
+	projPath, err := workspace.DetectProjectPath()
+	if err == nil && projPath != "" {
+		project, err := workspace.LoadProject(projPath)
+		if err == nil {
+			projectName = project.Name
+		}
+	}
+
+	pctx := &Context{
 		Diag:            d,
 		StatusDiag:      statusD,
 		Host:            host,
 		Pwd:             pwd,
+		Root:            root,
 		tracingSpan:     parentSpan,
 		DebugTraceMutex: &sync.Mutex{},
 		cancelLock:      &sync.Mutex{},
+		baseContext:     ctx,
 	}
 	if host == nil {
-		h, err := NewDefaultHost(ctx, runtimeOptions, disableProviderPreview, plugins, config)
+		h, err := NewDefaultHost(pctx, runtimeOptions, disableProviderPreview, plugins, config, debugging, projectName)
 		if err != nil {
 			return nil, err
 		}
-		ctx.Host = h
+		pctx.Host = h
 	}
-	return ctx, nil
+	return pctx, nil
+}
+
+// Base returns this plugin context's base context; this is useful for things like cancellation.
+func (ctx *Context) Base() context.Context {
+	return ctx.baseContext
 }
 
 // Request allocates a request sub-context.
 func (ctx *Context) Request() context.Context {
 	c := ctx.baseContext
-	if c == nil {
-		c = context.Background()
-	}
+	contract.Assertf(c != nil, "Context must have a base context")
 	c = opentracing.ContextWithSpan(c, ctx.tracingSpan)
 	c, cancel := context.WithCancel(c)
 	ctx.cancelLock.Lock()

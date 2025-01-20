@@ -66,10 +66,13 @@
                     "description": "A regex that is used by the importer to extract a module name from the module portion of a type token. Packages that use the module format \"namespace1/namespace2/.../namespaceN\" do not need to specify a format. The regex must define one capturing group that contains the module name, which must be formatted as \"namespace1/namespace2/...namespaceN\".",
                     "type": "string",
                     "format": "regex"
+                },
+                "supportPack": {
+                    "description": "Write the package to support the pack command.",
+                    "type": "boolean"
                 }
             },
-            "additionalProperties": false,
-            "required": ["moduleFormat"]
+            "additionalProperties": false
         },
         "config": {
             "description": "The package's configuration variables.",
@@ -129,6 +132,39 @@
         "language": {
             "description": "Additional language-specific data about the package.",
             "type": "object"
+        },
+        "parameterization": {
+            "description": "An optional object to define parameterization for the package.",
+            "type": "object",
+            "properties": {
+                "baseProvider": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "description": "The unqualified name of the package (e.g. \"aws\", \"azure\", \"gcp\", \"kubernetes\", \"random\")",
+                            "type": "string",
+                            "pattern": "^[a-zA-Z][-a-zA-Z0-9_]*$"
+                        },
+                        "version": {
+                            "description": "The version of the package. The version must be valid semver.",
+                            "type": "string",
+                            "pattern": "^v?(?P<major>0|[1-9]\\d*)\\.(?P<minor>0|[1-9]\\d*)\\.(?P<patch>0|[1-9]\\d*)(?:-(?P<prerelease>(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+(?P<buildmetadata>[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+                        },
+                        "pluginDownloadURL": {
+                            "description": "The URL to use when downloading the provider plugin binary.",
+                            "type": "string"
+                        }
+                    },
+                    "required": ["name", "version"],
+                    "additionalProperties": false
+                },
+                "parameter": {
+                    "description": "The parameter for the provider.",
+                    "type": "string",
+                    "contentEncoding": "base64"
+                }
+            },
+            "additionalProperties": false
         }
     },
     "additionalProperties": false,
@@ -261,7 +297,7 @@
                                     "minLength": 1
                                 },
                                 "mapping": {
-                                    "description": "an optional object to hold mappings between payload values and schema names or references",
+                                    "description": "An optional object to hold mappings between payload values and schema names or references",
                                     "type": "object",
                                     "additionalProperties": {
                                         "type": "string"
@@ -462,7 +498,7 @@
                     }
                 },
                 "stateInputs": {
-                    "description": "An optional objectTypeSpec that describes additional inputs that mau be necessary to get an existing resource. If this is unset, only an ID is necessary.",
+                    "description": "An optional objectTypeSpec that describes additional inputs that may be necessary to get an existing resource. If this is unset, only an ID is necessary.",
                     "$ref": "#/$defs/objectTypeSpec"
                 },
                 "aliases": {
@@ -646,7 +682,7 @@
             "type": "object",
             "properties": {
                 "packageName": {
-                    "description": "NPM package name (includes @namespace)",
+                    "description": "The PyPI package name.",
                     "type": "string"
                 },
                 "readme": {

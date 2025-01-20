@@ -17,6 +17,7 @@ package plugin
 import (
 	"context"
 
+	"github.com/pulumi/pulumi/sdk/v3/go/common/slice"
 	pulumirpc "github.com/pulumi/pulumi/sdk/v3/proto/go"
 	codegenrpc "github.com/pulumi/pulumi/sdk/v3/proto/go/codegen"
 )
@@ -35,7 +36,8 @@ func (c *converterServer) ConvertState(ctx context.Context,
 	req *pulumirpc.ConvertStateRequest,
 ) (*pulumirpc.ConvertStateResponse, error) {
 	resp, err := c.converter.ConvertState(ctx, &ConvertStateRequest{
-		MapperAddress: req.MapperTarget,
+		MapperTarget: req.MapperTarget,
+		Args:         req.Args,
 	})
 	if err != nil {
 		return nil, err
@@ -49,11 +51,21 @@ func (c *converterServer) ConvertState(ctx context.Context,
 			Id:                resource.ID,
 			Version:           resource.Version,
 			PluginDownloadURL: resource.PluginDownloadURL,
+			LogicalName:       resource.LogicalName,
+			IsRemote:          resource.IsRemote,
+			IsComponent:       resource.IsComponent,
 		}
 	}
 
+	// Translate the hcl.Diagnostics into rpc diagnostics.
+	diags := slice.Prealloc[*codegenrpc.Diagnostic](len(resp.Diagnostics))
+	for _, diag := range resp.Diagnostics {
+		diags = append(diags, HclDiagnosticToRPCDiagnostic(diag))
+	}
+
 	rpcResp := &pulumirpc.ConvertStateResponse{
-		Resources: resources,
+		Resources:   resources,
+		Diagnostics: diags,
 	}
 	return rpcResp, nil
 }
@@ -64,14 +76,16 @@ func (c *converterServer) ConvertProgram(ctx context.Context,
 	resp, err := c.converter.ConvertProgram(ctx, &ConvertProgramRequest{
 		SourceDirectory: req.SourceDirectory,
 		TargetDirectory: req.TargetDirectory,
-		MapperAddress:   req.MapperTarget,
+		MapperTarget:    req.MapperTarget,
+		LoaderTarget:    req.LoaderTarget,
+		Args:            req.Args,
 	})
 	if err != nil {
 		return nil, err
 	}
 
 	// Translate the hcl.Diagnostics into rpc diagnostics.
-	diags := make([]*codegenrpc.Diagnostic, 0, len(resp.Diagnostics))
+	diags := slice.Prealloc[*codegenrpc.Diagnostic](len(resp.Diagnostics))
 	for _, diag := range resp.Diagnostics {
 		diags = append(diags, HclDiagnosticToRPCDiagnostic(diag))
 	}

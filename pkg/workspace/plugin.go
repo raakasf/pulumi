@@ -15,12 +15,14 @@
 package workspace
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"time"
 
 	"github.com/blang/semver"
 
+	"github.com/pulumi/pulumi/pkg/v3/util"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/diag"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/util/logging"
 	"github.com/pulumi/pulumi/sdk/v3/go/common/workspace"
@@ -37,7 +39,7 @@ type InstallPluginError struct {
 func (err *InstallPluginError) Error() string {
 	var server string
 	if err.Spec.PluginDownloadURL != "" {
-		server = fmt.Sprintf(" --server %s", err.Spec.PluginDownloadURL)
+		server = " --server " + err.Spec.PluginDownloadURL
 	}
 
 	if err.Spec.Version != nil {
@@ -56,17 +58,22 @@ func (err *InstallPluginError) Unwrap() error {
 	return err.Err
 }
 
-func InstallPlugin(pluginSpec workspace.PluginSpec, log func(sev diag.Severity, msg string)) (*semver.Version, error) {
+func InstallPlugin(ctx context.Context, pluginSpec workspace.PluginSpec,
+	log func(sev diag.Severity, msg string),
+) (*semver.Version, error) {
+	util.SetKnownPluginDownloadURL(&pluginSpec)
+	util.SetKnownPluginVersion(&pluginSpec)
 	if pluginSpec.Version == nil {
 		var err error
-		pluginSpec.Version, err = pluginSpec.GetLatestVersion()
+		pluginSpec.Version, err = pluginSpec.GetLatestVersion(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("could not find latest version for provider %s: %w", pluginSpec.Name, err)
 		}
 	}
 
 	wrapper := func(stream io.ReadCloser, size int64) io.ReadCloser {
-		log(diag.Info, fmt.Sprintf("Downloading provider: %s", pluginSpec.Name))
+		// Log at info but to stderr so we don't pollute stdout for commands like `package get-schema`
+		log(diag.Infoerr, "Downloading provider: "+pluginSpec.Name)
 		return stream
 	}
 
@@ -76,7 +83,7 @@ func InstallPlugin(pluginSpec workspace.PluginSpec, log func(sev diag.Severity, 
 	}
 
 	logging.V(1).Infof("Automatically downloading provider %s", pluginSpec.Name)
-	downloadedFile, err := workspace.DownloadToFile(pluginSpec, wrapper, retry)
+	downloadedFile, err := workspace.DownloadToFile(ctx, pluginSpec, wrapper, retry)
 	if err != nil {
 		return nil, &InstallPluginError{
 			Spec: pluginSpec,
